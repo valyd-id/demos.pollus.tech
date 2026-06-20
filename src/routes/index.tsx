@@ -9,6 +9,8 @@ import { VerificationFlow } from "@/components/VerificationFlow";
 import { SiteFooter } from "@/components/SiteFooter";
 import { workflows, type Workflow } from "@/lib/workflows";
 
+const VERIFY_URL = import.meta.env.VITE_VERIFY_URL ?? "https://verify.pollus.tech";
+
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
@@ -137,7 +139,7 @@ function Index() {
             </p>
             <div className="mt-7 flex flex-col sm:flex-row items-center justify-center gap-3">
               <a
-                href="#"
+                href={VERIFY_URL}
                 className="inline-flex items-center justify-center rounded-full bg-primary text-primary-foreground px-5 py-3 text-sm font-medium hover:opacity-90 transition-opacity"
               >
                 Get started free
@@ -153,7 +155,14 @@ function Index() {
         </section>
       </main>
 
-      <SiteFooter />
+      <SiteFooter
+        onSelectWorkflow={(id) => {
+          const w = workflows.find((x) => x.id === id);
+          if (!w) return;
+          document.getElementById("workflows")?.scrollIntoView({ behavior: "smooth" });
+          window.setTimeout(() => setActive(w), 350);
+        }}
+      />
 
       <WorkflowModal
         workflow={active}
