@@ -1,0 +1,134 @@
+name: Deploy (demos)
+
+# Manual trigger only — run from the Actions tab (Run workflow) so a deploy
+# never fires automatically on push. To enable auto-deploy on merge to main,
+# add a `push:` block here, e.g.:
+#   push:
+#     branches: [main]
+#
+# NOTE ON THE STANDARD: demos.pollus.tech is a Node/Bun SSR app (TanStack Start
+# + Vite + Nitro) with NO database. So two items from the Laravel dev-repo
+# standard are deliberately omitted here, with reasons:
+#   - Migrations + DB backup (step 8): there is no DB and no `artisan migrate`.
+#   - Framework cache (step 9): there is no `config:cache`/`route:cache`; the
+#     Vite build is the optimization. Nothing to cache.
+on:
+  workflow_dispatch:
+
+# Prevent overlapping deploys from stacking up if you trigger twice quickly.
+concurrency:
+  group: deploy-demos
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          # Reusing the shared box secrets (demos lives on the same server as verify).
+          host: ${{ secrets.DEV_HOST }}
+          username: ${{ secrets.DEV_USER }}
+          key: ${{ secrets.DEV_SSH_KEY }}
+          script_stop: true   # abort on the first failing command
+          script: |
+            set -euo pipefail
+
+            # --- PATH hardening ---
+            # appleboy/ssh-action runs a NON-interactive shell, so ~/.bashrc /
+            # nvm / the bun installer's PATH edits are NOT loaded. Add the usual
+            # bin dirs so `bun` and `pm2` resolve. Adjust if your install differs
+            # (the preflight workflow prints exactly where each tool lives).
+            export PATH="$HOME/.bun/bin:$HOME/.local/bin:/usr/local/bin:$PATH"
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+
+            APP=/var/www/pollus_main_servers/demos.pollus.tech
+            cd "$APP"
+
+            git fetch --all --prune
+
+            # Safety guard 1: refuse to deploy if someone hand-edited TRACKED
+            # files on the server, so we never silently discard their work.
+            # Unlike the dev repo, NO build artifacts are tracked here (dist/,
+            # node_modules/, .output/ are all gitignored), so there is nothing
+            # to exclude — any tracked-file change is real and must block.
+            # Untracked files are ignored (-uno) since reset --hard keeps them.
+            DIRTY=$(git status --porcelain -uno)
+            if [ -n "$DIRTY" ]; then
+              echo "ERROR: the server has uncommitted changes to tracked files:" >&2
+              echo "$DIRTY" >&2
+              echo "" >&2
+              echo "Refusing to deploy so these are not discarded. On the server, either" >&2
+              echo "commit & push them, stash them (git stash), or revert (git checkout --)," >&2
+              echo "then re-run this workflow. (.env, node_modules/ and dist/ are gitignored" >&2
+              echo "and unaffected.)" >&2
+              exit 1
+            fi
+
+            # Safety guard 2: refuse to deploy if the server has local COMMITS
+            # that aren't on origin/main. reset --hard would abandon them
+            # (recoverable only via reflog), so stop and let a human push first.
+            AHEAD=$(git rev-list --count origin/main..HEAD)
+            if [ "$AHEAD" -gt 0 ]; then
+              echo "ERROR: the server has $AHEAD local commit(s) not on origin/main:" >&2
+              git log --oneline origin/main..HEAD >&2
+              echo "" >&2
+              echo "Refusing to deploy so these commits are not abandoned. On the server," >&2
+              echo "push them (git push), rebase them onto main, or remove them, then re-run." >&2
+              exit 1
+            fi
+
+            # Clean tree, no unpushed commits -> sync to origin/main.
+            git reset --hard origin/main
+
+            # --- Install deps (node_modules is NOT committed) ---
+            # --frozen-lockfile makes the install fail if bun.lock is out of sync
+            # rather than silently resolving new versions. Honors bunfig.toml's
+            # 24h supply-chain release-age guard.
+            bun install --frozen-lockfile
+
+            # --- Build the SSR app (dist/ is NOT committed) ---
+            # Produces dist/server/server.js (loaded by server.node.mjs) + dist/client.
+            bun run build
+
+            # --- File permissions (OPTIONAL — enable only if needed) ---
+            # If the SSH/deploy user ALSO owns $APP and runs pm2, nothing is
+            # needed here (the common Node setup). If pm2/nginx runs the app as a
+            # DIFFERENT user, uncomment the chown below. It needs PASSWORDLESS
+            # sudo for the deploy user (CI has no TTY, so a sudo password prompt
+            # would hang the job). The preflight workflow reports whether sudo -n
+            # works and whether $APP is already writable.
+            # sudo chown -R www-data:www-data "$APP/dist"
+
+            # --- Restart the SSR process so it picks up the new build ---
+            # pm2 app name "demos" is defined in ecosystem.config.cjs. reload =
+            # zero-downtime; falls back to a fresh start on first deploy.
+            if pm2 describe demos >/dev/null 2>&1; then
+              pm2 reload demos --update-env
+            else
+              pm2 start ecosystem.config.cjs
+            fi
+            pm2 save
+
+            # --- Post-deploy smoke test ---
+            # Fail the job (red) if the site isn't actually healthy after deploy.
+            # There is no dedicated /health route yet (recommend adding one), so
+            # we check the app root. We test BOTH the local SSR port (proves the
+            # Node process is up) and the public URL (proves nginx -> app works).
+            check() {
+              local url="$1"
+              local code="000"
+              for i in 1 2 3 4 5; do
+                code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$url" || echo "000")
+                if [ "$code" = "200" ]; then echo "  [ OK ]  $url -> 200"; return 0; fi
+                echo "  ...   $url -> $code (attempt $i, retrying)"; sleep 3
+              done
+              echo "  [FAIL] $url never returned 200 (last: $code)" >&2
+              return 1
+            }
+            echo ">> Smoke test"
+            check http://127.0.0.1:3100/        # local SSR process (pm2)
+            check https://demos.pollus.tech/    # public, through nginx
+            echo ">> Deploy complete and site healthy."

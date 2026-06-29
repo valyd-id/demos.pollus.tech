@@ -1,0 +1,105 @@
+name: Preflight (demos) — connectivity check
+
+# Read-only diagnostics for the demos server. Makes NO changes: no git pull,
+# no install, no build, no pm2 restart. Use this to validate SSH access,
+# required tooling, passwordless sudo, and git reachability BEFORE a real
+# deploy. Run from the Actions tab → "Preflight (demos)" → Run workflow.
+#
+# NOTE: this app has NO database, so there is no DB-reachability check (the
+# Laravel dev-repo preflight has one; it is N/A here).
+on:
+  workflow_dispatch:
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEV_HOST }}
+          username: ${{ secrets.DEV_USER }}
+          key: ${{ secrets.DEV_SSH_KEY }}
+          # NOTE: script_stop is intentionally OFF so every check runs and
+          # reports, instead of aborting at the first missing tool.
+          script: |
+            # Same PATH hardening as deploy.yml — non-interactive shell doesn't
+            # load nvm / bun installer PATH edits.
+            export PATH="$HOME/.bun/bin:$HOME/.local/bin:/usr/local/bin:$PATH"
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+
+            APP=/var/www/pollus_main_servers/demos.pollus.tech
+            ok()   { echo "  [ OK ]  $1"; }
+            warn() { echo "  [WARN]  $1"; }
+            bad()  { echo "  [FAIL]  $1"; }
+
+            echo "==> Identity"
+            echo "  user : $(whoami)"
+            echo "  host : $(hostname)"
+            echo "  pwd  : $(pwd)"
+
+            echo "==> Required tools on PATH"
+            for t in git node bun pm2 curl; do
+              if command -v "$t" >/dev/null 2>&1; then
+                ok "$t -> $(command -v "$t")  ($($t --version 2>/dev/null | head -n1))"
+              else
+                bad "$t NOT found on PATH (fix PATH in both workflows or install it)"
+              fi
+            done
+
+            echo "==> Passwordless sudo (only needed IF you enable the chown step)"
+            if sudo -n true 2>/dev/null; then
+              ok "sudo -n works (passwordless)"
+            else
+              warn "sudo needs a password — only matters if deploy.yml's chown is enabled."
+            fi
+
+            echo "==> App directory"
+            if [ -d "$APP" ]; then
+              ok "$APP exists"
+              if [ -w "$APP" ]; then
+                ok "$APP is writable by $(whoami) — no chown needed in deploy"
+              else
+                warn "$APP is NOT writable by $(whoami) — enable the chown step or fix ownership"
+              fi
+            else
+              bad "$APP does NOT exist"
+            fi
+
+            echo "==> .env present"
+            if [ -f "$APP/.env" ]; then
+              ok "$APP/.env present"
+            else
+              warn "$APP/.env MISSING — app falls back to ecosystem.config.cjs env (PORT 3100, VERIFY_API_URL). OK if intentional."
+            fi
+
+            echo "==> Git remote reachability (read-only, no pull)"
+            if [ -d "$APP/.git" ]; then
+              if git -C "$APP" ls-remote --heads origin main >/dev/null 2>&1; then
+                ok "origin reachable; current HEAD: $(git -C "$APP" rev-parse --short HEAD 2>/dev/null)"
+              else
+                bad "cannot reach git origin (check the server's deploy key / remote)"
+              fi
+            else
+              bad "$APP is not a git repo"
+            fi
+
+            echo "==> pm2 SSR process"
+            if command -v pm2 >/dev/null 2>&1; then
+              if pm2 describe demos >/dev/null 2>&1; then
+                ok "pm2 app 'demos' is registered ($(pm2 jlist 2>/dev/null | grep -o '"name":"demos".*"status":"[a-z]*"' | grep -o '"status":"[a-z]*"' | head -n1))"
+              else
+                warn "pm2 app 'demos' not registered yet — first deploy will 'pm2 start ecosystem.config.cjs'"
+              fi
+            else
+              bad "pm2 not found — cannot manage the SSR process"
+            fi
+
+            echo "==> Live site health"
+            lcode=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 http://127.0.0.1:3100/ || echo "ERR")
+            if [ "$lcode" = "200" ]; then ok "local  http://127.0.0.1:3100/ -> 200"; else warn "local  http://127.0.0.1:3100/ -> $lcode (SSR process down?)"; fi
+            pcode=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 https://demos.pollus.tech/ || echo "ERR")
+            if [ "$pcode" = "200" ]; then ok "public https://demos.pollus.tech/ -> 200"; else warn "public https://demos.pollus.tech/ -> $pcode (nginx or app issue?)"; fi
+
+            echo "==> Preflight finished (review any [WARN]/[FAIL] above before deploying)"
