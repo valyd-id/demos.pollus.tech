@@ -5,7 +5,7 @@ module.exports = {
   apps: [
     {
       name: "demos",
-      cwd: "/var/www/pollus_main_servers/demos.pollus.tech",
+      cwd: "/var/www/test_pollus_main_servers/demos.pollus.tech",
       script: "server.node.mjs",
       interpreter: "node",
       env: {
