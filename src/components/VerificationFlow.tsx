@@ -11,7 +11,7 @@ import {
   CircleDashed,
 } from "lucide-react";
 import type { Workflow } from "@/lib/workflows";
-import { verifyConfigFor } from "@/lib/workflows";
+import { verifyConfigFor, DEMO_LOCATION } from "@/lib/workflows";
 import { CameraCapture } from "@/components/CameraCapture";
 import { CredentialStep } from "@/components/CredentialStep";
 import { startVerification, uploadDocument, runCheck, getStatus } from "@/lib/api/verify.functions";
@@ -92,16 +92,56 @@ export function VerificationFlow({ workflow, onClose }: { workflow: Workflow | n
   };
   const close = () => { reset(); onClose(); };
 
+  const isLocationOnly = features.length === 1 && features[0] === "location";
+
   const begin = async () => {
     setBusy(true); setError(null);
     try {
-      const r = await startVerification({ data: { features } });
+      const metadata = features.includes("location")
+        ? { expected_location: { latitude: DEMO_LOCATION.latitude, longitude: DEMO_LOCATION.longitude } }
+        : undefined;
+      const r = await startVerification({ data: { features, metadata } });
       if (!r?.success) throw new Error(r?.error?.message || "Could not start verification");
       setSession(r.data);
+      if (isLocationOnly) { void runLocationOnly(r.data); return; }
       if (docs.length) { setPhase("capture"); setDocIndex(0); }
       else setPhase("credential"); // license-only: no camera, straight to the form
     } catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
+  };
+
+  // Location Match demo: capture the visitor's live GPS and match it against the demo point.
+  const runLocationOnly = async (sess: SessionData) => {
+    setPhase("processing");
+    setChecks({ location: "running" });
+    try {
+      if (!("geolocation" in navigator)) throw new Error("This browser can't share a location.");
+      const pos = await new Promise<GeolocationPosition>((res, rej) =>
+        navigator.geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: true, timeout: 12000 }),
+      );
+      const r = await runCheck({
+        data: {
+          token: sess.session_token,
+          check: "location",
+          payload: {
+            latitude: String(pos.coords.latitude),
+            longitude: String(pos.coords.longitude),
+          },
+        },
+      });
+      if (!r?.success) throw new Error(r?.error?.message || "Location check failed");
+      setChecks({ location: r.data.check.status });
+      const s = await getStatus({ data: { sessionId: sess.session_id } });
+      if (!s?.success) throw new Error(s?.error?.message || "Could not load result");
+      setResult(s.data);
+      setPhase("result");
+    } catch (e) {
+      const msg = (e as GeolocationPositionError)?.code === 1
+        ? "Location permission was denied — allow it and try again."
+        : (e as Error).message || "Couldn't capture your location.";
+      setError(msg);
+      setPhase("intro");
+    }
   };
 
   // After documents are captured, run KYC (if any) then go to the license form.

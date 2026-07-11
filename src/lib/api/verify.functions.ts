@@ -18,12 +18,28 @@ async function asJson(res: Response) {
 
 /** Start a demo verification session for the requested features. */
 export const startVerification = createServerFn({ method: "POST" })
-  .inputValidator(z.object({ features: z.array(z.string()).min(1) }))
+  .inputValidator(
+    z.object({
+      features: z.array(z.string()).min(1),
+      // Location-match demo: an expected point (+ optional radius) the location check matches against.
+      metadata: z
+        .object({
+          expected_location: z
+            .object({
+              latitude: z.number(),
+              longitude: z.number(),
+              radius_m: z.number().nullable().optional(),
+            })
+            .optional(),
+        })
+        .optional(),
+    }),
+  )
   .handler(async ({ data }) => {
     const res = await fetch(`${verifyBase()}/api/demo/start`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ features: data.features }),
+      body: JSON.stringify({ features: data.features, metadata: data.metadata ?? {} }),
     });
     return asJson(res);
   });

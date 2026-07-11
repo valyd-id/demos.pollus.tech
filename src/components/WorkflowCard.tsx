@@ -8,6 +8,7 @@ import {
   Cake,
   Home,
   BadgeCheck,
+  MapPin,
   type LucideIcon,
 } from "lucide-react";
 import type { Workflow } from "@/lib/workflows";
@@ -21,6 +22,7 @@ const iconMap: Record<string, LucideIcon> = {
   cake: Cake,
   home: Home,
   badge: BadgeCheck,
+  location: MapPin,
 };
 
 type Props = {

@@ -13,7 +13,7 @@ module.exports = {
         HOST: "127.0.0.1",
         PORT: "3100",
         // Demo server functions call the public Verify API.
-        VERIFY_API_URL: "https://verify.pollus.tech",
+        VERIFY_API_URL: "https://tidp.pollus.tech",
       },
       max_memory_restart: "300M",
       autorestart: true,

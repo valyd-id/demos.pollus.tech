@@ -19,7 +19,12 @@ export const WORKFLOW_VERIFY: Record<string, VerifyConfig> = {
   "kyc-license": { available: true, features: ["id_verification", "liveness", "face_match", "credential"] },
   liveness: { available: true, features: ["liveness"] },
   "face-auth": { available: true, features: ["id_verification", "face_match"] },
+  "location-match": { available: true, features: ["location"] },
 };
+
+// The fixed target the location-match demo compares the visitor's GPS against
+// (Valyd demo point). No radius → the check reports the live distance.
+export const DEMO_LOCATION = { latitude: 40.758, longitude: -73.9855 };
 
 export function verifyConfigFor(id: string): VerifyConfig {
   return WORKFLOW_VERIFY[id] ?? { available: false, features: [] };
@@ -105,5 +110,21 @@ export const workflows: Workflow[] = [
     ],
     accent: "from-rose-200/60 via-orange-200/40 to-transparent",
     icon: "face",
+  },
+  {
+    id: "location-match",
+    title: "Location Match",
+    tag: "Presence",
+    description: "Confirm where a user is and how far they are from an expected point.",
+    longDescription:
+      "Capture the user's live GPS position and match it against an expected location. Give a radius to get a simple inside/outside result, or omit it to just measure the distance — ideal for proof-of-presence, visit verification and EVV.",
+    features: [
+      "Live GPS capture in the browser",
+      "Distance from an expected point",
+      "Optional radius → inside / outside",
+      "Report-only — never blocks",
+    ],
+    accent: "from-teal-200/60 via-emerald-200/40 to-transparent",
+    icon: "location",
   },
 ];
