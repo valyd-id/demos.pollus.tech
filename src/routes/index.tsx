@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { SiteHeader } from "@/components/SiteHeader";
 import { Hero } from "@/components/Hero";
@@ -9,7 +9,7 @@ import { VerificationFlow } from "@/components/VerificationFlow";
 import { SiteFooter } from "@/components/SiteFooter";
 import { workflows, type Workflow } from "@/lib/workflows";
 
-const VERIFY_URL = import.meta.env.VITE_VERIFY_URL ?? "https://verify.pollus.tech";
+const CONSOLE_URL = import.meta.env.VITE_CONSOLE_URL ?? "https://dev.valyd.work";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -60,6 +60,17 @@ const howSteps = [
 function Index() {
   const [active, setActive] = useState<Workflow | null>(null);
   const [launched, setLaunched] = useState<Workflow | null>(null);
+
+  // Deep link: `?flow=<workflow-id>` (or `?demo=`) launches that verification straight away, so the
+  // "Try it live" buttons in the docs (docs.valyd.work) can open a specific flow in a new tab —
+  // the same experience as clicking a card here, no embedded iframe.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get("flow") ?? params.get("demo");
+    if (!id) return;
+    const w = workflows.find((x) => x.id === id);
+    if (w) setLaunched(w);
+  }, []);
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
@@ -139,7 +150,7 @@ function Index() {
             </p>
             <div className="mt-7 flex flex-col sm:flex-row items-center justify-center gap-3">
               <a
-                href={VERIFY_URL}
+                href={CONSOLE_URL}
                 className="inline-flex items-center justify-center rounded-full bg-primary text-primary-foreground px-5 py-3 text-sm font-medium hover:opacity-90 transition-opacity"
               >
                 Get started free

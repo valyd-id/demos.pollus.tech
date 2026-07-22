@@ -51,8 +51,8 @@ export function SiteFooter({
             © {new Date().getFullYear()} Valyd. Sandbox experience for demonstration purposes.
           </p>
           <div className="flex items-center gap-5 text-xs text-muted-foreground">
-            <a href="https://idp.pollus.tech/privacy" target="_blank" rel="noreferrer" className="hover:text-foreground transition-colors">Privacy</a>
-            <a href="https://idp.pollus.tech/terms" target="_blank" rel="noreferrer" className="hover:text-foreground transition-colors">Terms</a>
+            <a href="https://idp.valyd.work/privacy" target="_blank" rel="noreferrer" className="hover:text-foreground transition-colors">Privacy</a>
+            <a href="https://idp.valyd.work/terms" target="_blank" rel="noreferrer" className="hover:text-foreground transition-colors">Terms</a>
           </div>
         </div>
       </div>
